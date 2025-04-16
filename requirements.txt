@@ -1,0 +1,7 @@
+streamlit
+aiohttp
+python-dateutil
+google-generativeai
+dateparser
+python-dotenv
+amadeus
