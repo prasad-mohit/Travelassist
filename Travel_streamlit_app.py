@@ -48,23 +48,22 @@ model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
 # API Credentials
 AMADEUS_API_KEY = st.secrets.get("AMADEUS_API_KEY")
 AMADEUS_API_SECRET = st.secrets.get("AMADEUS_API_SECRET")
-# GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")  # Uncomment when ready
 
-# Airline and hotel logos (URLs or local paths)
+# Airline and hotel logos
 AIRLINE_LOGOS = {
-    "AI": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png",
-    "6E": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png",
-    "UK": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png",
-    "SG": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/SpiceJet_logo.svg/1200px-SpiceJet_logo.svg.png",
-    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Airplane_silhouette_S.svg/1200px-Airplane_silhouette_S.svg.png"
+    "AI": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/240px-Air_India_Logo.svg.png",
+    "6E": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/240px-IndiGo_logo.svg.png",
+    "UK": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/240px-Vistara_logo.svg.png",
+    "SG": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/SpiceJet_logo.svg/240px-SpiceJet_logo.svg.png",
+    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Airplane_silhouette_S.svg/240px-Airplane_silhouette_S.svg.png"
 }
 
 HOTEL_CHAINS = {
-    "Marriott": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png",
-    "Hilton": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Hilton_Hotels_%26_Resorts_logo.svg/1200px-Hilton_Hotels_%26_Resorts_logo.svg.png",
-    "Hyatt": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png",
-    "Taj": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Taj_Hotels_logo.svg/1200px-Taj_Hotels_logo.svg.png",
-    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/Hotel_symbol.svg/1200px-Hotel_symbol.svg.png"
+    "Marriott": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/240px-Marriott_International_logo_2019.svg.png",
+    "Hilton": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Hilton_Hotels_%26_Resorts_logo.svg/240px-Hilton_Hotels_%26_Resorts_logo.svg.png",
+    "Hyatt": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/240px-Hyatt_logo.svg.png",
+    "Taj": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Taj_Hotels_logo.svg/240px-Taj_Hotels_logo.svg.png",
+    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/Hotel_symbol.svg/240px-Hotel_symbol.svg.png"
 }
 
 # Airport codes mapping
@@ -74,15 +73,12 @@ AIRPORT_CODES = {
     "MAA": "Chennai", "JFK": "New York", "LHR": "London"
 }
 
-# Custom CSS - Enhanced with better colors and design elements
+# Custom CSS
 st.markdown("""
 <style>
-    /* Main container */
     .main {
         background-color: #f5f9ff;
     }
-    
-    /* Chat messages */
     .user-message {
         background-color: #4a8cff;
         color: white;
@@ -93,7 +89,6 @@ st.markdown("""
         margin-left: auto;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    
     .assistant-message {
         background-color: #ffffff;
         color: #333;
@@ -104,8 +99,6 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border: 1px solid #e1e1e1;
     }
-    
-    /* Input box */
     .stTextInput>div>div>input {
         color: #333 !important;
         background-color: white !important;
@@ -113,8 +106,6 @@ st.markdown("""
         border-radius: 20px !important;
         padding: 10px 15px !important;
     }
-    
-    /* Flight/hotel cards */
     .travel-card {
         border: 1px solid #ddd;
         border-radius: 10px;
@@ -123,12 +114,9 @@ st.markdown("""
         background-color: white;
         box-shadow: 0 2px 6px rgba(0,0,0,0.05);
     }
-    
     .travel-card:hover {
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
-    
-    /* Header styling */
     .header {
         background: linear-gradient(135deg, #4a8cff 0%, #2a56d6 100%);
         color: white;
@@ -136,30 +124,6 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 20px;
     }
-    
-    /* Logo grid */
-    .logo-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 15px;
-        justify-content: center;
-        margin: 20px 0;
-    }
-    
-    .logo-item {
-        width: 80px;
-        height: 80px;
-        object-fit: contain;
-        filter: grayscale(30%);
-        transition: all 0.3s ease;
-    }
-    
-    .logo-item:hover {
-        filter: grayscale(0%);
-        transform: scale(1.1);
-    }
-    
-    /* Price tag */
     .price-tag {
         background-color: #4a8cff;
         color: white;
@@ -168,11 +132,19 @@ st.markdown("""
         font-weight: bold;
         display: inline-block;
     }
-    
-    /* Rating stars */
     .rating {
         color: #FFD700;
         font-size: 18px;
+    }
+    .partner-logo {
+        height: 60px;
+        margin: 10px;
+        filter: grayscale(30%);
+        transition: all 0.3s ease;
+    }
+    .partner-logo:hover {
+        filter: grayscale(0%);
+        transform: scale(1.1);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -228,14 +200,6 @@ async def get_hotels(destination, check_in, check_out, travelers):
             "address": f"456 Main Street, {city}",
             "photo": "https://source.unsplash.com/random/300x200/?luxury+hotel",
             "chain": "Taj"
-        },
-        {
-            "name": f"{city} Central by Hyatt",
-            "price": 9500,
-            "rating": 4.2,
-            "address": f"789 Downtown, {city}",
-            "photo": "https://source.unsplash.com/random/300x200/?hotel+room",
-            "chain": "Hyatt"
         }
     ]
 
@@ -336,28 +300,27 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Partner logos - Fixed version
+# Partner logos - Fixed implementation
 st.markdown("### Our Travel Partners")
 
-# Create columns for logos
-cols = st.columns(5)
+# Using smaller image versions (240px width) for better loading
+partners = [
+    {"name": "Air India", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/240px-Air_India_Logo.svg.png"},
+    {"name": "IndiGo", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/240px-IndiGo_logo.svg.png"},
+    {"name": "Vistara", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/240px-Vistara_logo.svg.png"},
+    {"name": "Marriott", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/240px-Marriott_International_logo_2019.svg.png"},
+    {"name": "Hyatt", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/240px-Hyatt_logo.svg.png"}
+]
 
-# Display logos in columns
-with cols[0]:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png", 
-             width=80, caption="Air India")
-with cols[1]:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png", 
-             width=80, caption="IndiGo")
-with cols[2]:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png", 
-             width=80, caption="Vistara")
-with cols[3]:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png", 
-             width=80, caption="Marriott")
-with cols[4]:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png", 
-             width=80, caption="Hyatt")
+cols = st.columns(len(partners))
+for i, partner in enumerate(partners):
+    with cols[i]:
+        st.image(
+            partner["url"],
+            width=80,
+            caption=partner["name"]
+        )
+
 # Display conversation
 for msg in st.session_state.conversation:
     st.markdown(f"""
