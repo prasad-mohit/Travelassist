@@ -5,7 +5,14 @@ import json
 import google.generativeai as genai
 from datetime import datetime, timedelta
 import time
-# from googlemaps import Client as GoogleMaps  # Uncomment when you have API key
+
+# Streamlit page configuration MUST BE FIRST
+st.set_page_config(
+    page_title="TravelEase Assistant",
+    page_icon="✈️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Initialize session state
 def init_session_state():
@@ -202,32 +209,6 @@ async def search_flights(payload, token):
     except Exception:
         return None
 
-# async def get_hotels_google(destination, check_in, check_out, travelers):
-#     """Actual Google Places API implementation (requires API key)"""
-#     try:
-#         gmaps = GoogleMaps(GOOGLE_API_KEY)
-#         city = AIRPORT_CODES.get(destination, destination)
-#         places = gmaps.places_nearby(
-#             location=city,
-#             radius=5000,
-#             type='lodging',
-#             keyword='hotel'
-#         )
-        
-#         hotels = []
-#         for place in places.get('results', [])[:5]:
-#             details = gmaps.place(place['place_id'], fields=['name', 'formatted_address', 'price_level', 'rating', 'photo'])
-#             hotels.append({
-#                 "name": details['result']['name'],
-#                 "price": "$$$" if details['result'].get('price_level', 0) > 2 else "$$",
-#                 "rating": details['result'].get('rating', 4),
-#                 "address": details['result']['formatted_address'],
-#                 "photo": f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={details['result']['photos'][0]['photo_reference']}&key={GOOGLE_API_KEY}" if details['result'].get('photos') else None
-#             })
-#         return hotels
-#     except Exception:
-#         return None
-
 async def get_hotels(destination, check_in, check_out, travelers):
     """Simulated hotel search with enhanced data"""
     city = AIRPORT_CODES.get(destination, destination)
@@ -326,15 +307,6 @@ async def process_trip():
     check_out = st.session_state.trip_details.get("return_date", 
                 (datetime.strptime(check_in, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d"))
     
-    # Try Google API first, fallback to simulated data
-    # if GOOGLE_API_KEY:
-    #     st.session_state.results["hotels"] = await get_hotels_google(
-    #         st.session_state.trip_details["destination"],
-    #         check_in,
-    #         check_out,
-    #         st.session_state.trip_details["travelers"]
-    #     )
-    # else:
     st.session_state.results["hotels"] = await get_hotels(
         st.session_state.trip_details["destination"],
         check_in,
@@ -355,14 +327,6 @@ async def process_trip():
     st.session_state.search_in_progress = False
     st.session_state.current_step = "show_results"
     st.rerun()
-
-# Streamlit UI
-st.set_page_config(
-    page_title="TravelEase Assistant",
-    page_icon="✈️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Header with gradient
 st.markdown("""
