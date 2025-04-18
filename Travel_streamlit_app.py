@@ -4,6 +4,7 @@ import aiohttp
 import json
 import google.generativeai as genai
 from datetime import datetime, timedelta
+import random
 
 # Initialize session state
 def init_session_state():
@@ -24,6 +25,12 @@ def init_session_state():
         st.session_state.current_step = "welcome"
     if 'search_completed' not in st.session_state:
         st.session_state.search_completed = False
+    if 'results' not in st.session_state:
+        st.session_state.results = {
+            "flights": None,
+            "hotels": None,
+            "recommendations": None
+        }
 
 init_session_state()
 
@@ -126,15 +133,18 @@ async def search_hotels(city_code, check_in, check_out, travelers, token):
         return None
 
 def get_travel_recommendations(destination, dates):
+    # Enhanced prompt for more engaging responses
     prompt = f"""
-    Provide travel recommendations for {destination} during {dates}. Include:
-    - Top attractions to visit
-    - Local cuisine to try
-    - Cultural tips
-    - Packing suggestions
-    - Any seasonal events
+    Create engaging travel recommendations for {destination} during {dates}. Include:
     
-    Keep the response conversational and friendly.
+    1. A brief, enthusiastic intro about why {destination} is special during this time
+    2. Top 3-4 attractions with a sentence about each (no long descriptions)
+    3. 2-3 local food/drinks that visitors must try 
+    4. One cultural tip or local custom travelers should know
+    5. Quick seasonal advice (weather, events, crowds)
+    
+    Use a warm, conversational tone as if chatting with a friend. Include occasional emojis.
+    Limit to 250-300 words total.
     """
     try:
         response = model.generate_content(prompt)
@@ -142,20 +152,24 @@ def get_travel_recommendations(destination, dates):
     except Exception as e:
         return f"I'd love to tell you more about {destination}, but I'm having trouble accessing that information right now."
 
-def extract_trip_details(user_input):
+def extract_trip_details(user_input, current_details):
+    # Enhanced context-aware prompt
     prompt = f"""
     Analyze this travel request and extract details:
     "{user_input}"
     
-    Return JSON with any details you can find from this list:
+    Current known details (leave as is if not mentioned in new request):
+    {json.dumps(current_details, indent=2)}
+    
+    Return a JSON with any details you can find or that should be updated:
     - origin (IATA code)
     - destination (IATA code)
     - departure_date (YYYY-MM-DD)
-    - return_date (YYYY-MM-DD) if round trip
+    - return_date (YYYY-MM-DD if round trip)
     - travelers (number)
     - trip_type ("one-way" or "round-trip")
     
-    Example:
+    Example output:
     {{
         "origin": "DEL",
         "destination": "GOI",
@@ -165,7 +179,7 @@ def extract_trip_details(user_input):
         "trip_type": "round-trip"
     }}
     
-    Return ONLY the JSON object. If any field is missing, omit it.
+    Return ONLY the JSON object, nothing else. Preserve existing values if not mentioned.
     """
     
     try:
@@ -176,9 +190,43 @@ def extract_trip_details(user_input):
         elif response_text.startswith("```"):
             response_text = response_text[3:-3].strip()
         
-        return json.loads(response_text)
+        extracted_details = json.loads(response_text)
+        
+        # Merge with existing details (keep old values if not updated)
+        merged_details = current_details.copy()
+        for key, value in extracted_details.items():
+            if value:  # Only update if there's actually a value
+                merged_details[key] = value
+                
+        return merged_details
     except Exception as e:
-        return None
+        return current_details
+
+def generate_conversational_response(context, user_input):
+    prompt = f"""
+    You are a friendly travel assistant helping a customer plan a trip.
+    
+    Current conversation context:
+    {context}
+    
+    Latest user message:
+    "{user_input}"
+    
+    Generate a warm, conversational response that addresses their message. 
+    Keep it concise (2-3 sentences) but friendly.
+    
+    If they're asking about trip details, acknowledge what you understand so far.
+    If they need to provide more information, ask in a natural way.
+    Use light conversational elements like "Sounds exciting!" or "Great choice!"
+    
+    DON'T provide any specific flight or hotel data in your response.
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return "I understand! Let me help you with your travel plans."
 
 def check_missing_details(details):
     required_fields = ['origin', 'destination', 'departure_date']
@@ -232,277 +280,380 @@ def build_flight_payload(details):
         }
     }
 
-def show_flight_results(data):
+def format_flight_results(data):
     if not data or "data" not in data or not data["data"]:
-        st.error("I couldn't find any flights matching your criteria. Let me know if you'd like to try different dates.")
-        return
+        return None
 
-    st.subheader("Here are some flight options I found:")
-    for offer in data["data"]:
-        with st.expander(f"Flight for ₹{offer.get('price', {}).get('grandTotal', 'N/A')}"):
-            price = offer.get("price", {}).get("grandTotal", "N/A")
-            duration = offer.get("itineraries", [{}])[0].get("duration", "N/A")
-            st.markdown(f"**Price:** ₹{price} | **Duration:** {duration}")
+    markdown_result = "### ✈️ Flight Options\n\n"
+    
+    for idx, offer in enumerate(data["data"][:3], 1):  # Limit to top 3 flights
+        price = offer.get("price", {}).get("grandTotal", "N/A")
+        duration = offer.get("itineraries", [{}])[0].get("duration", "N/A")
+        
+        markdown_result += f"**Option {idx}: ₹{price}** | Duration: {duration}\n\n"
+        
+        for i_idx, itinerary in enumerate(offer.get("itineraries", [])):
+            markdown_result += f"{'Outbound' if i_idx == 0 else 'Return'}: "
             
-            for idx, itinerary in enumerate(offer.get("itineraries", [])):
-                st.markdown(f"### {'Outbound' if idx == 0 else 'Return'} Flight")
-                for seg in itinerary.get("segments", []):
-                    dep = seg.get("departure", {})
-                    arr = seg.get("arrival", {})
-                    carrier = seg.get("carrierCode", "N/A")
-                    flight_num = seg.get("number", "N/A")
-                    st.markdown(
-                        f"- **{dep.get('iataCode', '')} → {arr.get('iataCode', '')}**  \n"
-                        f"  {carrier} {flight_num}  \n"
-                        f"  Departure: {dep.get('at', 'N/A')}  \n"
-                        f"  Arrival: {arr.get('at', 'N/A')}"
-                    )
-            st.markdown("---")
+            segments = itinerary.get("segments", [])
+            for seg_idx, seg in enumerate(segments):
+                dep = seg.get("departure", {})
+                arr = seg.get("arrival", {})
+                carrier = seg.get("carrierCode", "N/A")
+                
+                dep_time = dep.get("at", "").split("T")[1][:5] if "T" in dep.get("at", "") else "N/A"
+                arr_time = arr.get("at", "").split("T")[1][:5] if "T" in arr.get("at", "") else "N/A"
+                
+                markdown_result += f"{dep.get('iataCode', '')} {dep_time} → {arr.get('iataCode', '')} {arr_time}"
+                
+                if seg_idx < len(segments) - 1:
+                    markdown_result += " | "
+            
+            markdown_result += "\n"
+        
+        markdown_result += "\n"
+    
+    return markdown_result
 
-def show_hotel_results(data):
+def format_hotel_results(data):
     if not data or "data" not in data or not data["data"]:
-        st.error("I couldn't find any hotels matching your criteria. Would you like to try different dates?")
-        return
+        return None
 
-    st.subheader("Here are some hotel options:")
-    for hotel in data["data"]:
+    markdown_result = "### 🏨 Hotel Options\n\n"
+    
+    for idx, hotel in enumerate(data["data"][:3], 1):  # Limit to top 3 hotels
         hotel_info = hotel.get("hotel", {})
         offers = hotel.get("offers", [])
         if not offers:
             continue
             
         offer = offers[0]
-        with st.expander(f"{hotel_info.get('name', 'Unknown Hotel')} - ₹{offer.get('price', {}).get('total', 'N/A')}/night"):
-            st.markdown(f"**{hotel_info.get('name', 'Unknown Hotel')}**")
-            st.markdown(f"**Rating:** {hotel_info.get('rating', 'N/A')}")
-            st.markdown(f"**Address:** {hotel_info.get('address', {}).get('lines', [''])[0]}")
-            st.markdown(f"**Price:** ₹{offer.get('price', {}).get('total', 'N/A')} total for your stay")
-            st.markdown(f"**Room Type:** {offer.get('room', {}).get('typeEstimated', {}).get('category', 'N/A')}")
-            st.markdown("---")
+        price = offer.get("price", {}).get("total", "N/A")
+        rating = hotel_info.get("rating", "N/A")
+        name = hotel_info.get("name", "Unknown Hotel")
+        
+        markdown_result += f"**{name}** ({'⭐' * int(rating) if rating.isdigit() else rating})\n"
+        markdown_result += f"Price: ₹{price} total | "
+        markdown_result += f"Room: {offer.get('room', {}).get('typeEstimated', {}).get('category', 'Standard')}\n\n"
+    
+    return markdown_result
+
+def gather_trip_results():
+    # Search and organize results
+    results = {}
+    
+    with st.spinner("Planning your perfect trip..."):
+        token_data = asyncio.run(get_amadeus_token())
+        if token_data:
+            token = token_data.get("access_token")
+            
+            # Get flights
+            payload = build_flight_payload(st.session_state.trip_details)
+            flight_data = asyncio.run(search_flights(payload, token))
+            results["flights"] = format_flight_results(flight_data)
+            
+            # Get hotels 
+            if st.session_state.trip_details.get('destination'):
+                check_in = st.session_state.trip_details['departure_date']
+                
+                # Set default check-out if not provided
+                if st.session_state.trip_details.get('return_date'):
+                    check_out = st.session_state.trip_details['return_date']
+                else:
+                    check_in_date = datetime.strptime(check_in, "%Y-%m-%d")
+                    check_out = (check_in_date + timedelta(days=3)).strftime("%Y-%m-%d")
+                
+                hotel_data = asyncio.run(search_hotels(
+                    st.session_state.trip_details['destination'],
+                    check_in,
+                    check_out,
+                    st.session_state.trip_details['travelers'],
+                    token
+                ))
+                results["hotels"] = format_hotel_results(hotel_data)
+        
+        # Get recommendations
+        if st.session_state.trip_details.get('destination'):
+            dates = st.session_state.trip_details['departure_date']
+            if st.session_state.trip_details.get('return_date'):
+                dates += f" to {st.session_state.trip_details['return_date']}"
+            else:
+                dates += " onwards"
+                
+            recommendations = get_travel_recommendations(
+                st.session_state.trip_details['destination'],
+                dates
+            )
+            results["recommendations"] = recommendations
+    
+    return results
+
+def show_trip_results():
+    results = st.session_state.results
+    
+    # Create tabs for the results
+    tab1, tab2, tab3 = st.tabs(["✈️ Flights", "🏨 Hotels", "🌴 Recommendations"])
+    
+    with tab1:
+        if results.get("flights"):
+            st.markdown(results["flights"])
+        else:
+            st.info("No flight options found for your search criteria. Try adjusting your dates or destinations.")
+    
+    with tab2:
+        if results.get("hotels"):
+            st.markdown(results["hotels"])
+        else:
+            st.info("No hotel options found for your search criteria.")
+    
+    with tab3:
+        if results.get("recommendations"):
+            st.markdown(results["recommendations"])
+        else:
+            st.info("Recommendations not available for this destination.")
+
+def create_welcome_message():
+    greetings = [
+        "Hi there! I'm your travel assistant. Where are you dreaming of going?",
+        "Hello! Ready to plan your next adventure? Where would you like to go?",
+        "Welcome! I'd love to help you plan your perfect trip. What destination are you thinking about?",
+        "Hey there, fellow traveler! What exciting destination can I help you explore?",
+        "Hi! Let's plan something amazing. Where would you like to travel to?"
+    ]
+    return random.choice(greetings)
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Travel Assistant", layout="centered")
-st.title("✈️ Travel Planning Assistant")
+st.set_page_config(
+    page_title="Travel Planner",
+    page_icon="✈️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# Display conversation history
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .chat-message {
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+    }
+    .chat-message.user {
+        background-color: #f0f7ff;
+        border-left: 5px solid #2986cc;
+    }
+    .chat-message.assistant {
+        background-color: #f9f9f9;
+        border-left: 5px solid #7cc576;
+    }
+    .message-content {
+        margin-left: 0.5rem;
+    }
+    .trip-summary {
+        background-color: #f0f9ff;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        border-left: 5px solid #3b82f6;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f0f7ff;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #d1e7ff !important;
+        border-bottom: 2px solid #1e88e5;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# App header with better styling
+col1, col2 = st.columns([1, 3])
+with col1:
+    st.image("https://www.svgrepo.com/show/494078/travel-flight-tickets.svg", width=100)
+with col2:
+    st.title("✈️ Travel Planning Assistant")
+    st.markdown("*Plan your perfect trip with personalized recommendations*")
+
+# Sidebar for trip details summary if available
+with st.sidebar:
+    st.header("Your Trip Details")
+    if st.session_state.trip_details.get("destination"):
+        st.markdown(f"**Origin:** {st.session_state.trip_details['origin']}")
+        st.markdown(f"**Destination:** {st.session_state.trip_details['destination']}")
+        st.markdown(f"**Departure:** {st.session_state.trip_details['departure_date']}")
+        if st.session_state.trip_details.get("return_date"):
+            st.markdown(f"**Return:** {st.session_state.trip_details['return_date']}")
+        st.markdown(f"**Travelers:** {st.session_state.trip_details['travelers']}")
+        
+        if st.button("Start a New Trip"):
+            st.session_state.trip_details = {
+                "origin": "",
+                "destination": "",
+                "departure_date": "",
+                "return_date": "",
+                "travelers": 1,
+                "trip_type": "one-way"
+            }
+            st.session_state.current_step = "welcome"
+            st.session_state.search_completed = False
+            st.session_state.results = {
+                "flights": None,
+                "hotels": None, 
+                "recommendations": None
+            }
+            st.session_state.conversation = []
+            st.rerun()
+    else:
+        st.info("Start a conversation to plan your trip!")
+
+# Initialize welcome message if first visit
+if not st.session_state.conversation:
+    welcome_msg = create_welcome_message()
+    st.session_state.conversation.append({
+        "role": "assistant",
+        "content": welcome_msg
+    })
+
+# Display conversation
 for msg in st.session_state.conversation:
     if msg["role"] == "user":
-        st.chat_message("user").write(msg["content"])
+        st.markdown(f"""
+        <div class="chat-message user">
+            <div class="message-content">{msg["content"]}</div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.chat_message("assistant").write(msg["content"])
+        st.markdown(f"""
+        <div class="chat-message assistant">
+            <div class="message-content">{msg["content"]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# Show results if search is completed
+if st.session_state.search_completed and st.session_state.results:
+    show_trip_results()
 
 # Get user input
-user_input = st.chat_input("How can I help with your travel plans?")
+with st.container():
+    user_input = st.chat_input("Type your travel plans or questions here...")
 
 if user_input:
     # Add user message to conversation
     st.session_state.conversation.append({"role": "user", "content": user_input})
-    st.chat_message("user").write(user_input)
     
     try:
-        if st.session_state.current_step == "welcome":
-            # Initial greeting and trip details collection
-            st.session_state.conversation.append({
-                "role": "assistant",
-                "content": "Great! I'd be happy to help plan your trip. Could you tell me more about your travel plans? For example: \n\n\"I want to fly from Delhi to Goa on May 5th with 6 people\""
-            })
-            st.chat_message("assistant").write("Great! I'd be happy to help plan your trip. Could you tell me more about your travel plans? For example: \n\n\"I want to fly from Delhi to Goa on May 5th with 6 people\"")
-            st.session_state.current_step = "collect_details"
+        # Extract trip details regardless of what step we're in
+        updated_details = extract_trip_details(user_input, st.session_state.trip_details)
+        st.session_state.trip_details = updated_details
         
-        elif st.session_state.current_step == "collect_details":
-            # Extract trip details from user input
-            with st.spinner("Analyzing your trip details..."):
-                new_details = extract_trip_details(user_input)
-                if new_details:
-                    # Update trip details
-                    for key in new_details:
-                        if key in st.session_state.trip_details:
-                            st.session_state.trip_details[key] = new_details[key]
-                    
-                    # Check for missing details
-                    missing = check_missing_details(st.session_state.trip_details)
-                    if missing:
-                        questions = {
-                            "origin": "Which city will you be flying from? (e.g., DEL for Delhi)",
-                            "destination": "Which city are you traveling to? (e.g., GOI for Goa)",
-                            "departure_date": "When are you planning to depart? (e.g., 2024-05-05)",
-                            "return_date": "When will you be returning? (e.g., 2024-05-12)",
-                            "travelers": "How many people will be traveling?"
-                        }
-                        question = questions.get(missing[0], "")
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": question
-                        })
-                        st.chat_message("assistant").write(question)
-                    else:
-                        # All details collected - proceed to next steps
-                        st.session_state.trip_details['hotel_check_in'] = st.session_state.trip_details['departure_date']
-                        if st.session_state.trip_details.get('return_date'):
-                            st.session_state.trip_details['hotel_check_out'] = st.session_state.trip_details['return_date']
-                        else:
-                            # Default to 3 nights if no return date
-                            check_in = datetime.strptime(st.session_state.trip_details['departure_date'], "%Y-%m-%d")
-                            st.session_state.trip_details['hotel_check_out'] = (check_in + timedelta(days=3)).strftime("%Y-%m-%d")
-                        
-                        # Show summary and automatically proceed to flights
-                        summary = f"""I have your trip details:
+        # Check if we have enough details to search
+        missing_details = check_missing_details(st.session_state.trip_details)
+        
+        if "new trip" in user_input.lower() or "start over" in user_input.lower():
+            # Reset for new trip
+            st.session_state.trip_details = {
+                "origin": "",
+                "destination": "",
+                "departure_date": "",
+                "return_date": "",
+                "travelers": 1,
+                "trip_type": "one-way"
+            }
+            st.session_state.current_step = "welcome"
+            st.session_state.search_completed = False
+            st.session_state.results = {
+                "flights": None,
+                "hotels": None,
+                "recommendations": None
+            }
+            
+            response = "Let's plan a new trip! Where would you like to go this time?"
+            
+        elif "search" in user_input.lower() or not missing_details:
+            # If we have all details OR user explicitly asks to search
+            if not missing_details:
+                # Show trip summary
+                summary = f"""I've got all your trip details:
 - Flying from: {st.session_state.trip_details['origin']}
 - Flying to: {st.session_state.trip_details['destination']}
 - Departure: {st.session_state.trip_details['departure_date']}"""
-                        
-                        if st.session_state.trip_details.get('return_date'):
-                            summary += f"\n- Return: {st.session_state.trip_details['return_date']}"
-                        
-                        summary += f"\n- Travelers: {st.session_state.trip_details['travelers']}"
-                        
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": summary + "\n\nLet me find some flight options for you..."
-                        })
-                        st.chat_message("assistant").markdown(summary + "\n\nLet me find some flight options for you...")
-                        st.session_state.current_step = "search_flights"
-                        st.rerun()
-                else:
-                    # Couldn't extract details - ask for clarification
-                    st.session_state.conversation.append({
-                        "role": "assistant",
-                        "content": "I couldn't quite understand your travel plans. Could you please tell me again where and when you're traveling? For example: \n\n\"I want to go to Goa from Delhi on May 5th with 6 people\""
-                    })
-                    st.chat_message("assistant").write("I couldn't quite understand your travel plans. Could you please tell me again where and when you're traveling? For example: \n\n\"I want to go to Goa from Delhi on May 5th with 6 people\"")
-        
-        elif st.session_state.current_step == "search_flights":
-            # Search for flights
-            with st.spinner("Searching for flight options..."):
-                payload = build_flight_payload(st.session_state.trip_details)
-                token_data = asyncio.run(get_amadeus_token())
-                if token_data:
-                    token = token_data.get("access_token")
-                    flight_data = asyncio.run(search_flights(payload, token))
-                    
-                    if flight_data:
-                        show_flight_results(flight_data)
-                        
-                        # Automatically proceed to hotels
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": "Now let me find some hotel options for your stay..."
-                        })
-                        st.chat_message("assistant").write("Now let me find some hotel options for your stay...")
-                        st.session_state.current_step = "search_hotels"
-                        st.rerun()
-                    else:
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": "I couldn't find any flights for those dates. Would you like to try different travel dates?"
-                        })
-                        st.chat_message("assistant").write("I couldn't find any flights for those dates. Would you like to try different travel dates?")
-                        st.session_state.current_step = "collect_details"
-                else:
-                    st.session_state.conversation.append({
-                        "role": "assistant",
-                        "content": "I'm having trouble accessing flight information right now. Let me try to find hotels instead."
-                    })
-                    st.chat_message("assistant").write("I'm having trouble accessing flight information right now. Let me try to find hotels instead.")
-                    st.session_state.current_step = "search_hotels"
-                    st.rerun()
-        
-        elif st.session_state.current_step == "search_hotels":
-            # Search for hotels
-            with st.spinner("Searching for hotel options..."):
-                token_data = asyncio.run(get_amadeus_token())
-                if token_data:
-                    token = token_data.get("access_token")
-                    hotel_data = asyncio.run(search_hotels(
-                        st.session_state.trip_details['destination'],
-                        st.session_state.trip_details['hotel_check_in'],
-                        st.session_state.trip_details['hotel_check_out'],
-                        st.session_state.trip_details['travelers'],
-                        token
-                    ))
-                    
-                    if hotel_data:
-                        show_hotel_results(hotel_data)
-                        
-                        # Automatically proceed to recommendations
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": f"Would you like some recommendations for things to do in {st.session_state.trip_details['destination']} during your stay?"
-                        })
-                        st.chat_message("assistant").write(f"Would you like some recommendations for things to do in {st.session_state.trip_details['destination']} during your stay?")
-                        st.session_state.current_step = "offer_recommendations"
-                    else:
-                        st.session_state.conversation.append({
-                            "role": "assistant",
-                            "content": "I couldn't find any hotels for those dates. Would you like to try different dates?"
-                        })
-                        st.chat_message("assistant").write("I couldn't find any hotels for those dates. Would you like to try different dates?")
-                        st.session_state.current_step = "collect_details"
-                else:
-                    st.session_state.conversation.append({
-                        "role": "assistant",
-                        "content": f"Would you like some recommendations for things to do in {st.session_state.trip_details['destination']} during your stay?"
-                    })
-                    st.chat_message("assistant").write(f"Would you like some recommendations for things to do in {st.session_state.trip_details['destination']} during your stay?")
-                    st.session_state.current_step = "offer_recommendations"
-        
-        elif st.session_state.current_step == "offer_recommendations":
-            if "yes" in user_input.lower() or "recommendation" in user_input.lower():
-                # Generate recommendations
-                dates = st.session_state.trip_details['departure_date']
+                
                 if st.session_state.trip_details.get('return_date'):
-                    dates += f" to {st.session_state.trip_details['return_date']}"
+                    summary += f"\n- Return: {st.session_state.trip_details['return_date']}"
                 
-                with st.spinner(f"Finding great things to do in {st.session_state.trip_details['destination']}..."):
-                    recommendations = get_travel_recommendations(
-                        st.session_state.trip_details['destination'],
-                        dates
-                    )
-                    st.session_state.conversation.append({
-                        "role": "assistant",
-                        "content": f"Here are some recommendations for your trip to {st.session_state.trip_details['destination']}:\n\n{recommendations}"
-                    })
-                    st.chat_message("assistant").markdown(f"Here are some recommendations for your trip to {st.session_state.trip_details['destination']}:\n\n{recommendations}")
+                summary += f"\n- Travelers: {st.session_state.trip_details['travelers']}"
                 
-                # Offer to plan another trip
-                st.session_state.conversation.append({
-                    "role": "assistant",
-                    "content": "Is there anything else I can help you with for this trip? Or would you like to plan another trip?"
-                })
-                st.chat_message("assistant").write("Is there anything else I can help you with for this trip? Or would you like to plan another trip?")
-                st.session_state.current_step = "follow_up"
+                # Search for flights, hotels, and recommendations together
+                st.session_state.results = gather_trip_results()
+                st.session_state.search_completed = True
+                
+                # Generate combined response
+                has_flights = st.session_state.results.get("flights") is not None
+                has_hotels = st.session_state.results.get("hotels") is not None
+                
+                response = f"{summary}\n\nI've found some great options for your trip! "
+                
+                if has_flights and has_hotels:
+                    response += "Check out the flight and hotel options in the tabs below. I've also included some recommendations for things to do at your destination!"
+                elif has_flights:
+                    response += "I found some flight options but couldn't find hotels for your dates. Take a look at the flights tab and my recommendations for your trip!"
+                elif has_hotels:
+                    response += "I found some hotels but couldn't find flight options for your dates. Take a look at the hotels tab and my recommendations for your trip!"
+                else:
+                    response += "I couldn't find flights or hotels matching your criteria. You might want to try different dates or destinations. I've still included some recommendations for your chosen destination!"
+                
             else:
-                # Skip recommendations
-                st.session_state.conversation.append({
-                    "role": "assistant",
-                    "content": "Is there anything else I can help you with for this trip? Or would you like to plan another trip?"
-                })
-                st.chat_message("assistant").write("Is there anything else I can help you with for this trip? Or would you like to plan another trip?")
-                st.session_state.current_step = "follow_up"
+                # Need more details but user wants to search
+                missing_field = missing_details[0]
+                questions = {
+                    "origin": "I need to know where you're flying from. Could you tell me the departure city?",
+                    "destination": "Where would you like to go? Please let me know your destination.",
+                    "departure_date": "When are you planning to leave? I need a departure date to find the best options.",
+                    "return_date": "Since you're looking for a round trip, when would you like to return?"
+                }
+                response = questions.get(missing_field, "I need a few more details before I can search for you.")
         
-        elif st.session_state.current_step == "follow_up":
-            if "another" in user_input.lower() or "new" in user_input.lower():
-                # Start over
-                init_session_state()
-                st.session_state.conversation.append({
-                    "role": "assistant",
-                    "content": "Great! Where would you like to go this time?"
-                })
-                st.chat_message("assistant").write("Great! Where would you like to go this time?")
-                st.rerun()
-            else:
-                # Assume they want to modify current trip
-                st.session_state.conversation.append({
-                    "role": "assistant",
-                    "content": "What would you like to change about your trip? You can modify dates, destination, or number of travelers."
-                })
-                st.chat_message("assistant").write("What would you like to change about your trip? You can modify dates, destination, or number of travelers.")
-                st.session_state.current_step = "collect_details"
-    
-    except Exception as e:
+        else:
+            # Generate conversational response based on what we already know
+            context = f"Trip details so far: {json.dumps(st.session_state.trip_details)}"
+            response = generate_conversational_response(context, user_input)
+            
+            # Ask for specific missing detail if needed
+            if missing_details:
+                missing_field = missing_details[0]
+                questions = {
+                    "origin": "By the way, where will you be departing from?",
+                    "destination": "And where are you heading to?",
+                    "departure_date": "When are you planning to travel?",
+                    "return_date": "And when would you like to return?" if st.session_state.trip_details.get("trip_type") == "round-trip" else ""
+                }
+                if questions.get(missing_field):
+                    response += " " + questions.get(missing_field)
+        
+        # Add assistant response to conversation
         st.session_state.conversation.append({
             "role": "assistant",
-            "content": "Sorry, I encountered an issue. Let's continue our conversation."
+            "content": response
         })
-        st.chat_message("assistant").write("Sorry, I encountered an issue. Let's continue our conversation.")
-        st.session_state.current_step = "follow_up"
+        
+        # Rerun to update UI
+        st.rerun()
+        
+    except Exception as e:
+        # Handle errors gracefully
+        st.session_state.conversation.append({
+            "role": "assistant",
+            "content": "I'm having a bit of trouble understanding. Could you please rephrase your request? I'm looking for details like where you want to go and when you're planning to travel."
+        })
+        st.rerun()
