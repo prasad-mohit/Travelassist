@@ -336,20 +336,28 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Partner logos
+# Partner logos - Fixed version
 st.markdown("### Our Travel Partners")
-col1, col2, col3, col4, col5 = st.columns(5)
-with col1:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png", width=80)
-with col2:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png", width=80)
-with col3:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png", width=80)
-with col4:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png", width=80)
-with col5:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png", width=80)
 
+# Create columns for logos
+cols = st.columns(5)
+
+# Display logos in columns
+with cols[0]:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png", 
+             width=80, caption="Air India")
+with cols[1]:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png", 
+             width=80, caption="IndiGo")
+with cols[2]:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png", 
+             width=80, caption="Vistara")
+with cols[3]:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png", 
+             width=80, caption="Marriott")
+with cols[4]:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png", 
+             width=80, caption="Hyatt")
 # Display conversation
 for msg in st.session_state.conversation:
     st.markdown(f"""
