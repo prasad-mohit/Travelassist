@@ -5,6 +5,7 @@ import json
 import google.generativeai as genai
 from datetime import datetime, timedelta
 import time
+# from googlemaps import Client as GoogleMaps  # Uncomment when you have API key
 
 # Initialize session state
 def init_session_state():
@@ -40,6 +41,24 @@ model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
 # API Credentials
 AMADEUS_API_KEY = st.secrets.get("AMADEUS_API_KEY")
 AMADEUS_API_SECRET = st.secrets.get("AMADEUS_API_SECRET")
+# GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")  # Uncomment when ready
+
+# Airline and hotel logos (URLs or local paths)
+AIRLINE_LOGOS = {
+    "AI": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png",
+    "6E": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png",
+    "UK": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png",
+    "SG": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/SpiceJet_logo.svg/1200px-SpiceJet_logo.svg.png",
+    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Airplane_silhouette_S.svg/1200px-Airplane_silhouette_S.svg.png"
+}
+
+HOTEL_CHAINS = {
+    "Marriott": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png",
+    "Hilton": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Hilton_Hotels_%26_Resorts_logo.svg/1200px-Hilton_Hotels_%26_Resorts_logo.svg.png",
+    "Hyatt": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png",
+    "Taj": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Taj_Hotels_logo.svg/1200px-Taj_Hotels_logo.svg.png",
+    "default": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/Hotel_symbol.svg/1200px-Hotel_symbol.svg.png"
+}
 
 # Airport codes mapping
 AIRPORT_CODES = {
@@ -48,30 +67,46 @@ AIRPORT_CODES = {
     "MAA": "Chennai", "JFK": "New York", "LHR": "London"
 }
 
-# Custom CSS
+# Custom CSS - Enhanced with better colors and design elements
 st.markdown("""
 <style>
+    /* Main container */
+    .main {
+        background-color: #f5f9ff;
+    }
+    
     /* Chat messages */
     .user-message {
-        background-color: #e3f2fd;
+        background-color: #4a8cff;
+        color: white;
         border-radius: 15px 15px 0 15px;
         padding: 12px 16px;
         margin: 8px 0;
         max-width: 80%;
         margin-left: auto;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    
     .assistant-message {
-        background-color: #f1f1f1;
+        background-color: #ffffff;
+        color: #333;
         border-radius: 15px 15px 15px 0;
         padding: 12px 16px;
         margin: 8px 0;
         max-width: 80%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e1e1e1;
     }
+    
     /* Input box */
     .stTextInput>div>div>input {
         color: #333 !important;
         background-color: white !important;
+        border: 1px solid #ddd !important;
+        border-radius: 20px !important;
+        padding: 10px 15px !important;
     }
+    
     /* Flight/hotel cards */
     .travel-card {
         border: 1px solid #ddd;
@@ -79,6 +114,58 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
         background-color: white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    
+    .travel-card:hover {
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    /* Header styling */
+    .header {
+        background: linear-gradient(135deg, #4a8cff 0%, #2a56d6 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
+    
+    /* Logo grid */
+    .logo-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        justify-content: center;
+        margin: 20px 0;
+    }
+    
+    .logo-item {
+        width: 80px;
+        height: 80px;
+        object-fit: contain;
+        filter: grayscale(30%);
+        transition: all 0.3s ease;
+    }
+    
+    .logo-item:hover {
+        filter: grayscale(0%);
+        transform: scale(1.1);
+    }
+    
+    /* Price tag */
+    .price-tag {
+        background-color: #4a8cff;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-weight: bold;
+        display: inline-block;
+    }
+    
+    /* Rating stars */
+    .rating {
+        color: #FFD700;
+        font-size: 18px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -115,23 +202,59 @@ async def search_flights(payload, token):
     except Exception:
         return None
 
+# async def get_hotels_google(destination, check_in, check_out, travelers):
+#     """Actual Google Places API implementation (requires API key)"""
+#     try:
+#         gmaps = GoogleMaps(GOOGLE_API_KEY)
+#         city = AIRPORT_CODES.get(destination, destination)
+#         places = gmaps.places_nearby(
+#             location=city,
+#             radius=5000,
+#             type='lodging',
+#             keyword='hotel'
+#         )
+        
+#         hotels = []
+#         for place in places.get('results', [])[:5]:
+#             details = gmaps.place(place['place_id'], fields=['name', 'formatted_address', 'price_level', 'rating', 'photo'])
+#             hotels.append({
+#                 "name": details['result']['name'],
+#                 "price": "$$$" if details['result'].get('price_level', 0) > 2 else "$$",
+#                 "rating": details['result'].get('rating', 4),
+#                 "address": details['result']['formatted_address'],
+#                 "photo": f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={details['result']['photos'][0]['photo_reference']}&key={GOOGLE_API_KEY}" if details['result'].get('photos') else None
+#             })
+#         return hotels
+#     except Exception:
+#         return None
+
 async def get_hotels(destination, check_in, check_out, travelers):
-    """Simulated hotel search"""
+    """Simulated hotel search with enhanced data"""
     city = AIRPORT_CODES.get(destination, destination)
     return [
         {
-            "name": f"Grand {city} Hotel",
+            "name": f"Grand {city} Hotel by Marriott",
             "price": 7500,
-            "rating": 4,
+            "rating": 4.5,
             "address": f"123 Beach Road, {city}",
-            "photo": "https://source.unsplash.com/random/300x200/?hotel"
+            "photo": "https://source.unsplash.com/random/300x200/?hotel",
+            "chain": "Marriott"
         },
         {
-            "name": f"{city} Palace",
+            "name": f"{city} Palace by Taj",
             "price": 12000,
             "rating": 5,
             "address": f"456 Main Street, {city}",
-            "photo": "https://source.unsplash.com/random/300x200/?luxury+hotel"
+            "photo": "https://source.unsplash.com/random/300x200/?luxury+hotel",
+            "chain": "Taj"
+        },
+        {
+            "name": f"{city} Central by Hyatt",
+            "price": 9500,
+            "rating": 4.2,
+            "address": f"789 Downtown, {city}",
+            "photo": "https://source.unsplash.com/random/300x200/?hotel+room",
+            "chain": "Hyatt"
         }
     ]
 
@@ -203,6 +326,15 @@ async def process_trip():
     check_out = st.session_state.trip_details.get("return_date", 
                 (datetime.strptime(check_in, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d"))
     
+    # Try Google API first, fallback to simulated data
+    # if GOOGLE_API_KEY:
+    #     st.session_state.results["hotels"] = await get_hotels_google(
+    #         st.session_state.trip_details["destination"],
+    #         check_in,
+    #         check_out,
+    #         st.session_state.trip_details["travelers"]
+    #     )
+    # else:
     st.session_state.results["hotels"] = await get_hotels(
         st.session_state.trip_details["destination"],
         check_in,
@@ -228,11 +360,31 @@ async def process_trip():
 st.set_page_config(
     page_title="TravelEase Assistant",
     page_icon="✈️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("✈️ TravelEase Assistant")
-st.markdown("Your personal travel planning companion")
+# Header with gradient
+st.markdown("""
+<div class="header">
+    <h1 style="color:white; margin:0;">✈️ TravelEase Assistant</h1>
+    <p style="color:white; margin:0;">Your personal travel planning companion</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Partner logos
+st.markdown("### Our Travel Partners")
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Air_India_Logo.svg/1200px-Air_India_Logo.svg.png", width=80)
+with col2:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/IndiGo_logo.svg/1200px-IndiGo_logo.svg.png", width=80)
+with col3:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Vistara_logo.svg/1200px-Vistara_logo.svg.png", width=80)
+with col4:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/1200px-Marriott_International_logo_2019.svg.png", width=80)
+with col5:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Hyatt_logo.svg/1200px-Hyatt_logo.svg.png", width=80)
 
 # Display conversation
 for msg in st.session_state.conversation:
@@ -243,7 +395,7 @@ for msg in st.session_state.conversation:
     """, unsafe_allow_html=True)
 
 # User input
-if user_input := st.chat_input("Where would you like to travel?"):
+if user_input := st.chat_input("Where would you like to travel?", key="chat_input"):
     st.session_state.conversation.append({"role": "user", "content": user_input})
     
     try:
@@ -333,24 +485,44 @@ if st.session_state.current_step == "show_results":
     with st.expander("✈️ Flight Options", expanded=True):
         if st.session_state.results["flights"]:
             for offer in st.session_state.results["flights"].get("data", [])[:3]:
-                price = offer["price"]["grandTotal"]
-                st.markdown(f"**₹{price}**")
-                for seg in offer["itineraries"][0]["segments"]:
-                    st.write(f"{seg['departure']['iataCode']}→{seg['arrival']['iataCode']} "
-                            f"{seg['carrierCode']}{seg['number']} "
-                            f"{seg['departure']['at'][11:16]}-{seg['arrival']['at'][11:16]}")
+                airline_code = offer['itineraries'][0]['segments'][0]['carrierCode']
+                airline_logo = AIRLINE_LOGOS.get(airline_code, AIRLINE_LOGOS['default'])
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.image(airline_logo, width=80)
+                with col2:
+                    price = offer["price"]["grandTotal"]
+                    st.markdown(f"**<span class='price-tag'>₹{price}</span>**", unsafe_allow_html=True)
+                    
+                    for seg in offer["itineraries"][0]["segments"]:
+                        st.write(f"**{seg['departure']['iataCode']} → {seg['arrival']['iataCode']}** "
+                                f"{seg['carrierCode']}{seg['number']} "
+                                f"{seg['departure']['at'][11:16]}-{seg['arrival']['at'][11:16]}")
+                st.markdown("---")
         else:
             st.info("No flights found")
     
     with st.expander("🏨 Hotel Options"):
         if st.session_state.results["hotels"]:
             for hotel in st.session_state.results["hotels"][:3]:
-                st.markdown(f"**{hotel['name']}** - ₹{hotel['price']} {'⭐' * hotel['rating']}")
-                st.image(hotel["photo"], width=200)
+                chain_logo = HOTEL_CHAINS.get(hotel.get("chain", ""), HOTEL_CHAINS['default'])
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.image(hotel["photo"], width=150)
+                with col2:
+                    st.markdown(f"**{hotel['name']}**")
+                    st.markdown(f"<div class='rating'>{'⭐' * int(hotel['rating'])}{'☆' * (5 - int(hotel['rating']))}</div>", unsafe_allow_html=True)
+                    st.markdown(f"**<span class='price-tag'>₹{hotel['price']}</span>** per night", unsafe_allow_html=True)
+                    st.markdown(f"📍 {hotel['address']}")
+                    if hotel.get("chain"):
+                        st.image(chain_logo, width=100)
+                st.markdown("---")
         else:
             st.info("No hotels found")
     
-    with st.expander("🌴 Recommendations"):
+    with st.expander("🌴 Travel Recommendations"):
         if st.session_state.results["recommendations"]:
             st.write(st.session_state.results["recommendations"])
         else:
