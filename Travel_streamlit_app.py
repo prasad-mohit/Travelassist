@@ -61,8 +61,8 @@ AIRLINE_LOGOS = {
 }
 
 HOTEL_CHAINS = {
-    "Marriott": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/2560px-Marriott_International_logo_2019.svg.png",
-    "Hilton": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Hilton_Hotels_%26_Resorts_logo.svg/2560px-Hilton_Hotels_%26_Resorts_logo.svg.png",
+    "Marriott": "https://logos-world.net/wp-content/uploads/2021/08/Marriott-Logo.png",
+    "Hilton": "https://logos-world.net/wp-content/uploads/2021/02/Hilton-Logo.png",
     "default": "https://cdn-icons-png.flaticon.com/512/2969/2969446.png"
 }
 
@@ -70,7 +70,7 @@ PARTNER_LOGOS = [
     {"name": "Air India", "url": "https://www.airindia.com/content/dam/air-india/airindia-revamp/logos/AI_Logo_Red_New.svg"},
     {"name": "IndiGo", "url": "https://www.goindigo.in/content/dam/s6web/in/en/assets/logo/IndiGo_logo_2x.png"},
     {"name": "SpiceJet", "url": "https://www.spicejet.com/v1.svg"},
-    {"name": "Marriott", "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Marriott_International_logo_2019.svg/2560px-Marriott_International_logo_2019.svg.png"}
+    {"name": "Marriott", "url": "https://logos-world.net/wp-content/uploads/2021/08/Marriott-Logo.png"}
 ]
 
 AIRPORT_CODES = {
@@ -82,7 +82,82 @@ AIRPORT_CODES = {
 # Custom CSS
 st.markdown("""
 <style>
-    /* [Previous CSS remains exactly the same] */
+    .main {
+        background-color: #f5f9ff;
+    }
+    .user-message {
+        background-color: #4a8cff;
+        color: white;
+        border-radius: 15px 15px 0 15px;
+        padding: 12px 16px;
+        margin: 8px 0;
+        max-width: 80%;
+        margin-left: auto;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .assistant-message {
+        background-color: #ffffff;
+        color: #333;
+        border-radius: 15px 15px 15px 0;
+        padding: 12px 16px;
+        margin: 8px 0;
+        max-width: 80%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e1e1e1;
+    }
+    .stTextInput>div>div>input {
+        color: #333 !important;
+        background-color: white !important;
+        border: 1px solid #ddd !important;
+        border-radius: 20px !important;
+        padding: 10px 15px !important;
+    }
+    .travel-card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        background-color: white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    .travel-card:hover {
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .header {
+        background: linear-gradient(135deg, #4a8cff 0%, #2a56d6 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
+    .price-tag {
+        background-color: #4a8cff;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-weight: bold;
+        display: inline-block;
+    }
+    .rating {
+        color: #FFD700;
+        font-size: 18px;
+    }
+    .partner-logo {
+        height: 60px;
+        margin: 10px;
+        filter: grayscale(30%);
+        transition: all 0.3s ease;
+    }
+    .partner-logo:hover {
+        filter: grayscale(0%);
+        transform: scale(1.1);
+    }
+    .logo-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100px;
+    }
     .typing-indicator:after {
         content: '...';
         animation: typing 1s infinite;
@@ -219,7 +294,7 @@ def build_flight_payload(details):
             "maxFlightOffers": 3,
             "flightFilters": {
                 "cabinRestrictions": [{
-                    "cabin": details.get("class", "ECONOMY"),
+                    "cabin": details.get("class", "ECONOMY").upper(),
                     "coverage": "MOST_SEGMENTS",
                     "originDestinationIds": ["1"]
                 }]
@@ -407,17 +482,27 @@ def handle_user_input(user_input):
                 # Check if we have everything needed
                 missing = get_missing_fields(st.session_state.trip_details)
                 if not missing:
-                    # We have all required info
-                    summary = f"""Got it! Traveling from {st.session_state.trip_details['origin']} to {
-                        st.session_state.trip_details['destination']} on {
+                    # We have all required info - confirm before searching
+                    origin_name = AIRPORT_CODES.get(st.session_state.trip_details['origin'], st.session_state.trip_details['origin'])
+                    dest_name = AIRPORT_CODES.get(st.session_state.trip_details['destination'], st.session_state.trip_details['destination'])
+                    
+                    summary = f"""I'll search for flights from {origin_name} to {dest_name} on {
                         st.session_state.trip_details['departure_date']}"""
+                        
                     if st.session_state.trip_details.get("return_date"):
                         summary += f", returning {st.session_state.trip_details['return_date']}"
-                    summary += f" with {st.session_state.trip_details['travelers']} traveler(s)."
+                    
+                    summary += f" for {st.session_state.trip_details['travelers']} traveler(s)."
+                    
+                    if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
+                        summary += f"\n\nClass: {st.session_state.trip_details['class'].title()}"
+                    
+                    if st.session_state.trip_details.get("budget"):
+                        summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
                     
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": f"{summary}\n\nSearching for options..."
+                        "content": f"{summary}\n\nSearching now..."
                     })
                     asyncio.run(process_trip())
                 else:
@@ -444,43 +529,50 @@ def handle_user_input(user_input):
                             "content": get_prompt_for_field(next_field)
                         })
                     else:
-                        summary = f"""Got it! Traveling from {st.session_state.trip_details['origin']} to {
-                            st.session_state.trip_details['destination']} on {
+                        # Confirm details before searching
+                        origin_name = AIRPORT_CODES.get(st.session_state.trip_details['origin'], st.session_state.trip_details['origin'])
+                        dest_name = AIRPORT_CODES.get(st.session_state.trip_details['destination'], st.session_state.trip_details['destination'])
+                        
+                        summary = f"""I'll search for flights from {origin_name} to {dest_name} on {
                             st.session_state.trip_details['departure_date']}"""
+                            
                         if st.session_state.trip_details.get("return_date"):
                             summary += f", returning {st.session_state.trip_details['return_date']}"
-                        summary += f" with {st.session_state.trip_details['travelers']} traveler(s)."
+                        
+                        summary += f" for {st.session_state.trip_details['travelers']} traveler(s)."
+                        
+                        if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
+                            summary += f"\n\nClass: {st.session_state.trip_details['class'].title()}"
+                        
+                        if st.session_state.trip_details.get("budget"):
+                            summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
                         
                         st.session_state.conversation.append({
                             "role": "assistant",
-                            "content": f"{summary}\n\nSearching for options..."
+                            "content": f"{summary}\n\nSearching now..."
                         })
                         asyncio.run(process_trip())
                 else:
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": "I didn't understand. Try something like: 'Flight from Delhi to Mumbai on June 10th'"
+                        "content": "I didn't understand that. Could you try something like:\n\n"
+                                  "'Flight from Delhi to Goa on May 5th'\n"
+                                  "'2 people going to Mumbai next weekend'\n"
+                                  "'Hotels in Bangalore for 3 nights from tomorrow'"
                     })
         
         elif st.session_state.current_step == "show_results":
-            st.session_state.conversation.append({
-                "role": "assistant",
-                "content": "Here are your options! Need anything else?"
-            })
-            st.session_state.current_step = "follow_up"
-        
-        elif st.session_state.current_step == "follow_up":
             if "yes" in user_input.lower() or "search" in user_input.lower():
-                init_session_state()
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "Great! Where would you like to go?"
+                    "content": "What would you like to search for next?"
                 })
+                init_session_state()  # Reset search but keep conversation
                 st.session_state.current_step = "collect_details"
             else:
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "Happy travels! Come back anytime."
+                    "content": "Thank you for using TravelEase! Type your next travel question or say 'search' to start over."
                 })
         
         st.rerun()
@@ -489,7 +581,7 @@ def handle_user_input(user_input):
         st.error(f"Error: {str(e)}")
         st.session_state.conversation.append({
             "role": "assistant",
-            "content": "Something went wrong. Let's try again."
+            "content": "Sorry, I encountered an error. Let's try again. What were you looking for?"
         })
         st.session_state.current_step = "collect_details"
         st.rerun()
