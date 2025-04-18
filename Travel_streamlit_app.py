@@ -4,36 +4,32 @@ import aiohttp
 import json
 import google.generativeai as genai
 from datetime import datetime, timedelta
-import random
-import re
+import time
 
 # Initialize session state
 def init_session_state():
-    if 'conversation' not in st.session_state:
-        st.session_state.conversation = []
-    if 'trip_details' not in st.session_state:
-        st.session_state.trip_details = {
+    session_defaults = {
+        'conversation': [],
+        'trip_details': {
             "origin": "",
             "destination": "",
             "departure_date": "",
             "return_date": "",
             "travelers": 1,
-            "trip_type": "one-way",
-            "hotel_check_in": "",
-            "hotel_check_out": ""
-        }
-    if 'current_step' not in st.session_state:
-        st.session_state.current_step = "welcome"
-    if 'search_in_progress' not in st.session_state:
-        st.session_state.search_in_progress = False
-    if 'results' not in st.session_state:
-        st.session_state.results = {
+            "trip_type": "one-way"
+        },
+        'current_step': "welcome",
+        'search_in_progress': False,
+        'results': {
             "flights": None,
             "hotels": None,
             "recommendations": None
         }
-    if 'awaiting_confirmation' not in st.session_state:
-        st.session_state.awaiting_confirmation = False
+    }
+    
+    for key, value in session_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 init_session_state()
 
@@ -41,24 +37,53 @@ init_session_state()
 genai.configure(api_key=st.secrets.get("GEMINI_API_KEY"))
 model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
 
-# --- Amadeus Credentials ---
+# API Credentials
 AMADEUS_API_KEY = st.secrets.get("AMADEUS_API_KEY")
 AMADEUS_API_SECRET = st.secrets.get("AMADEUS_API_SECRET")
 
-# Common airport codes and city names for better display
+# Airport codes mapping
 AIRPORT_CODES = {
-    "DEL": "Delhi",
-    "BOM": "Mumbai",
-    "GOI": "Goa",
-    "BLR": "Bangalore",
-    "HYD": "Hyderabad",
-    "CCU": "Kolkata",
-    "MAA": "Chennai",
-    "JFK": "New York",
-    "LHR": "London"
+    "DEL": "Delhi", "BOM": "Mumbai", "GOI": "Goa",
+    "BLR": "Bangalore", "HYD": "Hyderabad", "CCU": "Kolkata",
+    "MAA": "Chennai", "JFK": "New York", "LHR": "London"
 }
 
-# --- Helper Functions ---
+# Custom CSS
+st.markdown("""
+<style>
+    /* Chat messages */
+    .user-message {
+        background-color: #e3f2fd;
+        border-radius: 15px 15px 0 15px;
+        padding: 12px 16px;
+        margin: 8px 0;
+        max-width: 80%;
+        margin-left: auto;
+    }
+    .assistant-message {
+        background-color: #f1f1f1;
+        border-radius: 15px 15px 15px 0;
+        padding: 12px 16px;
+        margin: 8px 0;
+        max-width: 80%;
+    }
+    /* Input box */
+    .stTextInput>div>div>input {
+        color: #333 !important;
+        background-color: white !important;
+    }
+    /* Flight/hotel cards */
+    .travel-card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        background-color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Helper Functions
 async def get_amadeus_token():
     url = "https://test.api.amadeus.com/v1/security/oauth2/token"
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
@@ -70,10 +95,8 @@ async def get_amadeus_token():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, data=data) as resp:
-                if resp.status != 200:
-                    return None
-                return await resp.json()
-    except Exception as e:
+                return await resp.json() if resp.status == 200 else None
+    except Exception:
         return None
 
 async def search_flights(payload, token):
@@ -88,242 +111,112 @@ async def search_flights(payload, token):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status != 200:
-                    return None
-                return await resp.json()
-    except Exception as e:
+                return await resp.json() if resp.status == 200 else None
+    except Exception:
         return None
 
-async def search_hotels(city_code, check_in, check_out, travelers, token):
-    if not token:
-        return None
-        
-    # First get hotel IDs
-    url = "https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city"
-    params = {
-        'cityCode': city_code,
-        'radius': 5,
-        'radiusUnit': 'KM',
-        'includeClosed': False,
-        'bestRateOnly': True,
-        'ratings': '3,4,5'
-    }
-    
-    headers = {
-        'Authorization': f"Bearer {token}",
-        'Content-Type': 'application/json'
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, params=params) as resp:
-                if resp.status != 200:
-                    return None
-                
-                hotels_data = await resp.json()
-                if not hotels_data.get('data'):
-                    return None
-                
-                # Get offers for each hotel
-                offers_url = "https://test.api.amadeus.com/v3/shopping/hotel-offers"
-                all_offers = []
-                
-                for hotel in hotels_data['data'][:3]:  # Limit to 3 hotels
-                    params = {
-                        'hotelId': hotel['hotelId'],
-                        'adults': travelers,
-                        'checkInDate': check_in,
-                        'checkOutDate': check_out,
-                        'roomQuantity': 1
-                    }
-                    
-                    async with session.get(offers_url, headers=headers, params=params) as offers_resp:
-                        if offers_resp.status == 200:
-                            offer_data = await offers_resp.json()
-                            if offer_data.get('data'):
-                                all_offers.extend(offer_data['data'])
-                
-                return {"data": all_offers} if all_offers else None
-    except Exception as e:
-        return None
+async def get_hotels(destination, check_in, check_out, travelers):
+    """Simulated hotel search"""
+    city = AIRPORT_CODES.get(destination, destination)
+    return [
+        {
+            "name": f"Grand {city} Hotel",
+            "price": 7500,
+            "rating": 4,
+            "address": f"123 Beach Road, {city}",
+            "photo": "https://source.unsplash.com/random/300x200/?hotel"
+        },
+        {
+            "name": f"{city} Palace",
+            "price": 12000,
+            "rating": 5,
+            "address": f"456 Main Street, {city}",
+            "photo": "https://source.unsplash.com/random/300x200/?luxury+hotel"
+        }
+    ]
 
 def get_travel_recommendations(destination, dates):
-    city_name = AIRPORT_CODES.get(destination, destination)
-    prompt = f"""
-    Create engaging travel recommendations for {city_name} during {dates}. Include:
-    1. Top 3 attractions with brief descriptions
-    2. 2-3 local foods to try
-    3. One cultural tip
-    4. Packing suggestion
-    
-    Keep it conversational and under 200 words.
-    """
+    city = AIRPORT_CODES.get(destination, destination)
+    prompt = f"""Provide 3-5 travel recommendations for {city} during {dates} 
+    including attractions, food, and cultural tips in a concise paragraph."""
     try:
         response = model.generate_content(prompt)
         return response.text
-    except Exception as e:
-        return f"Here are some things to do in {city_name}:\n\n(Recommendations could not be loaded at this time)"
+    except Exception:
+        return f"Top things to do in {city}:\n\n(Recommendations unavailable)"
 
 def extract_trip_details(user_input):
-    prompt = f"""
-    Extract travel details from this query:
-    "{user_input}"
-    
-    Return JSON with:
-    - origin (IATA code)
-    - destination (IATA code)
-    - departure_date (YYYY-MM-DD)
-    - return_date (YYYY-MM-DD if round trip)
-    - travelers (number)
-    - trip_type ("one-way" or "round-trip")
-    
-    Example:
-    {{
-        "origin": "DEL",
-        "destination": "GOI",
-        "departure_date": "2025-05-01",
-        "return_date": "2025-05-10",
-        "travelers": 2,
-        "trip_type": "round-trip"
-    }}
-    
-    Return ONLY the JSON object.
-    """
+    prompt = f"""Extract travel details from: "{user_input}"
+    Return JSON with: origin (IATA), destination (IATA), 
+    departure_date (YYYY-MM-DD), return_date (if round trip), 
+    travelers (number), trip_type ("one-way" or "round-trip")"""
     try:
         response = model.generate_content(prompt)
-        response_text = response.text.strip()
-        if response_text.startswith("```json"):
-            response_text = response_text[7:-3].strip()
-        elif response_text.startswith("```"):
-            response_text = response_text[3:-3].strip()
-        return json.loads(response_text)
-    except Exception as e:
+        return json.loads(response.text.strip().strip('```json').strip('```'))
+    except Exception:
         return None
 
-def check_missing_details(details):
-    required_fields = ['origin', 'destination', 'departure_date']
-    if details.get('trip_type', 'one-way') == 'round-trip':
-        required_fields.append('return_date')
-    return [field for field in required_fields if not details.get(field)]
-
 def build_flight_payload(details):
-    origin_destinations = [{
-        "id": "1",
-        "originLocationCode": details.get("origin"),
-        "destinationLocationCode": details.get("destination"),
-        "departureDateTimeRange": {
-            "date": details.get("departure_date"),
-            "time": "10:00:00"
-        }
-    }]
-    
-    if details.get("trip_type") == "round-trip" and details.get("return_date"):
-        origin_destinations.append({
-            "id": "2",
-            "originLocationCode": details.get("destination"),
-            "destinationLocationCode": details.get("origin"),
+    payload = {
+        "currencyCode": "INR",
+        "originDestinations": [{
+            "id": "1",
+            "originLocationCode": details["origin"],
+            "destinationLocationCode": details["destination"],
             "departureDateTimeRange": {
-                "date": details.get("return_date"),
+                "date": details["departure_date"],
+                "time": "10:00:00"
+            }
+        }],
+        "travelers": [{"id": str(i+1), "travelerType": "ADULT"} 
+                     for i in range(details["travelers"])],
+        "sources": ["GDS"],
+        "searchCriteria": {"maxFlightOffers": 3}
+    }
+    
+    if details["trip_type"] == "round-trip" and details.get("return_date"):
+        payload["originDestinations"].append({
+            "id": "2",
+            "originLocationCode": details["destination"],
+            "destinationLocationCode": details["origin"],
+            "departureDateTimeRange": {
+                "date": details["return_date"],
                 "time": "10:00:00"
             }
         })
-    
-    return {
-        "currencyCode": "INR",
-        "originDestinations": origin_destinations,
-        "travelers": [
-            {
-                "id": str(i+1),
-                "travelerType": "ADULT"
-            } for i in range(details.get("travelers", 1))
-        ],
-        "sources": ["GDS"],
-        "searchCriteria": {
-            "maxFlightOffers": 3,
-            "flightFilters": {
-                "cabinRestrictions": [
-                    {
-                        "cabin": "ECONOMY",
-                        "coverage": "MOST_SEGMENTS",
-                        "originDestinationIds": ["1", "2"] if details.get("trip_type") == "round-trip" else ["1"]
-                    }
-                ]
-            }
-        }
-    }
+    return payload
 
-def format_flight_results(data):
-    if not data or "data" not in data or not data["data"]:
-        return None
-
-    result = "### Flight Options\n\n"
-    for idx, offer in enumerate(data["data"], 1):
-        price = offer.get("price", {}).get("grandTotal", "N/A")
-        duration = offer.get("itineraries", [{}])[0].get("duration", "").replace("PT", "").replace("H", "h ").replace("M", "m")
-        
-        result += f"#### Option {idx}: ₹{price}\n"
-        result += f"**Duration:** {duration}\n"
-        
-        for seg in offer.get("itineraries", [{}])[0].get("segments", []):
-            dep = seg.get("departure", {})
-            arr = seg.get("arrival", {})
-            result += f"- {dep.get('iataCode', '')} → {arr.get('iataCode', '')} | {seg.get('carrierCode', '')} {seg.get('number', '')}\n"
-            result += f"  Depart: {dep.get('at', '')[:16].replace('T', ' ')}\n"
-            result += f"  Arrive: {arr.get('at', '')[:16].replace('T', ' ')}\n"
-        
-        result += "\n---\n"
-    
-    return result
-
-def format_hotel_results(data):
-    if not data or "data" not in data or not data["data"]:
-        return None
-
-    result = "### Hotel Options\n\n"
-    for idx, hotel in enumerate(data["data"], 1):
-        name = hotel.get("hotel", {}).get("name", "Unknown Hotel")
-        price = hotel.get("offers", [{}])[0].get("price", {}).get("total", "N/A")
-        rating = hotel.get("hotel", {}).get("rating", "N/A")
-        
-        result += f"#### {name} {'⭐' * int(rating) if rating.isdigit() else ''}\n"
-        result += f"**Price:** ₹{price}\n"
-        result += f"**Room Type:** {hotel.get('offers', [{}])[0].get('room', {}).get('typeEstimated', {}).get('category', 'Standard')}\n"
-        result += "\n---\n"
-    
-    return result
-
-async def process_trip_details():
+async def process_trip():
     st.session_state.search_in_progress = True
     
     # Get flights
-    token_data = await get_amadeus_token()
-    if token_data:
-        token = token_data.get("access_token")
-        payload = build_flight_payload(st.session_state.trip_details)
-        flight_data = await search_flights(payload, token)
-        st.session_state.results["flights"] = format_flight_results(flight_data)
-        
-        # Get hotels
-        check_in = st.session_state.trip_details['departure_date']
-        check_out = st.session_state.trip_details.get('return_date', 
-                    (datetime.strptime(check_in, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d")
-        
-        hotel_data = await search_hotels(
-            st.session_state.trip_details['destination'],
-            check_in,
-            check_out,
-            st.session_state.trip_details['travelers'],
-            token
+    token = await get_amadeus_token()
+    if token:
+        flights = await search_flights(
+            build_flight_payload(st.session_state.trip_details),
+            token["access_token"]
         )
-        st.session_state.results["hotels"] = format_hotel_results(hotel_data)
+        st.session_state.results["flights"] = flights
+    
+    # Get hotels
+    check_in = st.session_state.trip_details["departure_date"]
+    check_out = st.session_state.trip_details.get("return_date", 
+                (datetime.strptime(check_in, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d"))
+    
+    st.session_state.results["hotels"] = await get_hotels(
+        st.session_state.trip_details["destination"],
+        check_in,
+        check_out,
+        st.session_state.trip_details["travelers"]
+    )
     
     # Get recommendations
-    dates = st.session_state.trip_details['departure_date']
-    if st.session_state.trip_details.get('return_date'):
+    dates = st.session_state.trip_details["departure_date"]
+    if st.session_state.trip_details.get("return_date"):
         dates += f" to {st.session_state.trip_details['return_date']}"
     
     st.session_state.results["recommendations"] = get_travel_recommendations(
-        st.session_state.trip_details['destination'],
+        st.session_state.trip_details["destination"],
         dates
     )
     
@@ -331,131 +224,138 @@ async def process_trip_details():
     st.session_state.current_step = "show_results"
     st.rerun()
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="Travel Assistant", layout="centered")
-st.title("✈️ Travel Planning Assistant")
+# Streamlit UI
+st.set_page_config(
+    page_title="TravelEase Assistant",
+    page_icon="✈️",
+    layout="wide"
+)
 
-# Display conversation history
+st.title("✈️ TravelEase Assistant")
+st.markdown("Your personal travel planning companion")
+
+# Display conversation
 for msg in st.session_state.conversation:
-    if msg["role"] == "user":
-        st.chat_message("user").write(msg["content"])
-    else:
-        st.chat_message("assistant").write(msg["content"])
+    st.markdown(f"""
+    <div class="{'user' if msg['role']=='user' else 'assistant'}-message">
+        {msg["content"]}
+    </div>
+    """, unsafe_allow_html=True)
 
-# Get user input
-user_input = st.chat_input("How can I help with your travel plans?")
-
-if user_input and not st.session_state.search_in_progress:
+# User input
+if user_input := st.chat_input("Where would you like to travel?"):
     st.session_state.conversation.append({"role": "user", "content": user_input})
-    st.chat_message("user").write(user_input)
     
     try:
         if st.session_state.current_step == "welcome":
             st.session_state.conversation.append({
                 "role": "assistant",
-                "content": "Hi there! I can help you plan your trip. Tell me where you're going and when, like: 'I want to fly from Delhi to Goa on May 5th with 2 people'"
+                "content": "Welcome! Tell me your travel plans like: 'I want to fly from Delhi to Goa on May 5th with 2 people'"
             })
-            st.chat_message("assistant").write("Hi there! I can help you plan your trip. Tell me where you're going and when, like: 'I want to fly from Delhi to Goa on May 5th with 2 people'")
             st.session_state.current_step = "collect_details"
         
         elif st.session_state.current_step == "collect_details":
-            details = extract_trip_details(user_input)
-            if details:
-                for key in details:
-                    if key in st.session_state.trip_details and details[key]:
-                        st.session_state.trip_details[key] = details[key]
+            if details := extract_trip_details(user_input):
+                st.session_state.trip_details.update(
+                    {k: v for k, v in details.items() if v}
+                )
                 
-                missing = check_missing_details(st.session_state.trip_details)
+                missing = [
+                    f for f in ['origin', 'destination', 'departure_date'] 
+                    if not st.session_state.trip_details.get(f)
+                ]
+                if st.session_state.trip_details.get("trip_type") == "round-trip":
+                    missing.append("return_date") if not st.session_state.trip_details.get("return_date") else None
+                
                 if missing:
-                    questions = {
-                        "origin": "Which city are you flying from? (e.g., DEL for Delhi)",
-                        "destination": "Which city are you traveling to? (e.g., GOI for Goa)",
-                        "departure_date": "When are you departing? (e.g., 2025-05-05)",
-                        "return_date": "When will you be returning? (e.g., 2025-05-12)",
+                    prompts = {
+                        "origin": "Which city are you flying from? (e.g., DEL)",
+                        "destination": "Where are you flying to? (e.g., GOI)",
+                        "departure_date": "When are you departing? (YYYY-MM-DD)",
+                        "return_date": "When will you return? (YYYY-MM-DD)",
                         "travelers": "How many people are traveling?"
                     }
-                    question = questions.get(missing[0], "")
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": question
+                        "content": prompts[missing[0]]
                     })
-                    st.chat_message("assistant").write(question)
                 else:
-                    # All details collected
-                    summary = f"""Got it! You're traveling:
-- From: {AIRPORT_CODES.get(st.session_state.trip_details['origin'], st.session_state.trip_details['origin'])}
-- To: {AIRPORT_CODES.get(st.session_state.trip_details['destination'], st.session_state.trip_details['destination'])}
-- Departure: {st.session_state.trip_details['departure_date']}"""
-                    
-                    if st.session_state.trip_details.get('return_date'):
-                        summary += f"\n- Return: {st.session_state.trip_details['return_date']}"
-                    
-                    summary += f"\n- Travelers: {st.session_state.trip_details['travelers']}"
+                    summary = f"""Got it! Traveling from {st.session_state.trip_details['origin']} to {
+                        st.session_state.trip_details['destination']} on {
+                        st.session_state.trip_details['departure_date']}"""
+                    if st.session_state.trip_details.get("return_date"):
+                        summary += f", returning {st.session_state.trip_details['return_date']}"
+                    summary += f" with {st.session_state.trip_details['travelers']} traveler(s)."
                     
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": summary + "\n\nLet me find the best options for you..."
+                        "content": f"{summary}\n\nSearching for options..."
                     })
-                    st.chat_message("assistant").markdown(summary + "\n\nLet me find the best options for you...")
-                    
-                    # Start searching
-                    asyncio.run(process_trip_details())
+                    asyncio.run(process_trip())
             else:
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "I didn't quite catch that. Could you tell me again where and when you're traveling? For example: 'I want to go to Goa from Delhi on May 5th with 2 people'"
+                    "content": "I didn't understand. Try something like: 'Flight from Delhi to Mumbai on June 10th'"
                 })
-                st.chat_message("assistant").write("I didn't quite catch that. Could you tell me again where and when you're traveling? For example: 'I want to go to Goa from Delhi on May 5th with 2 people'")
         
         elif st.session_state.current_step == "show_results":
-            # Show results in tabs
-            tab1, tab2, tab3 = st.tabs(["Flights", "Hotels", "Recommendations"])
-            
-            with tab1:
-                if st.session_state.results.get("flights"):
-                    st.markdown(st.session_state.results["flights"])
-                else:
-                    st.info("No flights found for your search criteria.")
-            
-            with tab2:
-                if st.session_state.results.get("hotels"):
-                    st.markdown(st.session_state.results["hotels"])
-                else:
-                    st.info("No hotels found for your search criteria.")
-            
-            with tab3:
-                if st.session_state.results.get("recommendations"):
-                    st.markdown(st.session_state.results["recommendations"])
-                else:
-                    st.info("No recommendations available.")
-            
             st.session_state.conversation.append({
                 "role": "assistant",
-                "content": "Here are your travel options! Would you like to plan another trip?"
+                "content": "Here are your options! Need anything else?"
             })
-            st.chat_message("assistant").write("Here are your travel options! Would you like to plan another trip?")
             st.session_state.current_step = "follow_up"
         
         elif st.session_state.current_step == "follow_up":
-            if "yes" in user_input.lower() or "another" in user_input.lower():
+            if "yes" in user_input.lower():
                 init_session_state()
-                st.rerun()
+                st.session_state.conversation.append({
+                    "role": "assistant",
+                    "content": "Great! Where would you like to go?"
+                })
             else:
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "Great! Let me know if you need anything else."
+                    "content": "Happy travels! Come back anytime."
                 })
-                st.chat_message("assistant").write("Great! Let me know if you need anything else.")
+        
+        st.rerun()
     
-    except Exception as e:
+    except Exception:
         st.session_state.conversation.append({
             "role": "assistant",
-            "content": "Sorry, I encountered an error. Let's try again."
+            "content": "Something went wrong. Let's try again."
         })
-        st.chat_message("assistant").write("Sorry, I encountered an error. Let's try again.")
         st.session_state.current_step = "collect_details"
+        st.rerun()
 
-# Show loading spinner if search is in progress
+# Display results
+if st.session_state.current_step == "show_results":
+    with st.expander("✈️ Flight Options", expanded=True):
+        if st.session_state.results["flights"]:
+            for offer in st.session_state.results["flights"].get("data", [])[:3]:
+                price = offer["price"]["grandTotal"]
+                st.markdown(f"**₹{price}**")
+                for seg in offer["itineraries"][0]["segments"]:
+                    st.write(f"{seg['departure']['iataCode']}→{seg['arrival']['iataCode']} "
+                            f"{seg['carrierCode']}{seg['number']} "
+                            f"{seg['departure']['at'][11:16]}-{seg['arrival']['at'][11:16]}")
+        else:
+            st.info("No flights found")
+    
+    with st.expander("🏨 Hotel Options"):
+        if st.session_state.results["hotels"]:
+            for hotel in st.session_state.results["hotels"][:3]:
+                st.markdown(f"**{hotel['name']}** - ₹{hotel['price']} {'⭐' * hotel['rating']}")
+                st.image(hotel["photo"], width=200)
+        else:
+            st.info("No hotels found")
+    
+    with st.expander("🌴 Recommendations"):
+        if st.session_state.results["recommendations"]:
+            st.write(st.session_state.results["recommendations"])
+        else:
+            st.info("No recommendations available")
+
+# Loading indicator
 if st.session_state.search_in_progress:
-    with st.spinner("Searching for the best travel options..."):
-        time.sleep(1)
+    st.spinner("Finding the best options...")
