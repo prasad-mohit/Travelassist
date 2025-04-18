@@ -461,52 +461,51 @@ def handle_user_input(user_input):
     
     try:
         if st.session_state.current_step == "welcome":
-            # Initial generic response
-            response = """Hello! I'm your TravelEase assistant. I can help you:
-            - Find flights ✈️
-            - Book hotels 🏨
-            - Get travel recommendations 🌴
-            
-            Tell me about your trip like: 
-            "I want to fly from Delhi to Goa on May 5th for 2 people" 
-            or "Find me hotels in Bangalore for next weekend" """
-            st.session_state.conversation.append({"role": "assistant", "content": response})
+            system_msg = """
+            You are a friendly travel assistant named TravelEase. Greet the user warmly,
+            briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),
+            and encourage them to describe their trip naturally. Be human and conversational.
+            """
+            gemini_input = f"{system_msg}
+
+User: {user_input}"
+            reply = model.generate_content(gemini_input).text.strip()
+            st.session_state.conversation.append({"role": "assistant", "content": reply})
             st.session_state.current_step = "collect_details"
-        
+
         elif st.session_state.current_step == "collect_details":
             if st.session_state.awaiting_input_for:
                 # Store the user's response for the specific field we asked for
                 st.session_state.trip_details[st.session_state.awaiting_input_for] = user_input
                 st.session_state.awaiting_input_for = None
-                
-                # Check if we have everything needed
+
                 missing = get_missing_fields(st.session_state.trip_details)
                 if not missing:
-                    # We have all required info - confirm before searching
                     origin_name = AIRPORT_CODES.get(st.session_state.trip_details['origin'], st.session_state.trip_details['origin'])
                     dest_name = AIRPORT_CODES.get(st.session_state.trip_details['destination'], st.session_state.trip_details['destination'])
-                    
-                    summary = f"""I'll search for flights from {origin_name} to {dest_name} on {
-                        st.session_state.trip_details['departure_date']}"""
-                        
+
+                    summary = f"Great! ✈️ I'm searching for flights from {origin_name} to {dest_name} on {st.session_state.trip_details['departure_date']}"
                     if st.session_state.trip_details.get("return_date"):
                         summary += f", returning {st.session_state.trip_details['return_date']}"
-                    
+
                     summary += f" for {st.session_state.trip_details['travelers']} traveler(s)."
-                    
+
                     if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
-                        summary += f"\n\nClass: {st.session_state.trip_details['class'].title()}"
-                    
+                        summary += f"
+
+Class: {st.session_state.trip_details['class'].title()}"
                     if st.session_state.trip_details.get("budget"):
-                        summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
-                    
+                        summary += f"
+Budget: ₹{st.session_state.trip_details['budget']}"
+
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": f"{summary}\n\nSearching now..."
+                        "content": f"{summary}
+
+Hang tight while I look that up! 🔍"
                     })
                     asyncio.run(process_trip())
                 else:
-                    # Ask for next missing field
                     next_field = missing[0]
                     st.session_state.awaiting_input_for = next_field
                     st.session_state.conversation.append({
@@ -514,12 +513,10 @@ def handle_user_input(user_input):
                         "content": get_prompt_for_field(next_field)
                     })
             else:
-                # Extract details from user's message
                 if details := extract_trip_details(user_input):
                     st.session_state.trip_details.update(
                         {k: v for k, v in details.items() if v}
                     )
-                    
                     missing = get_missing_fields(st.session_state.trip_details)
                     if missing:
                         next_field = missing[0]
@@ -529,52 +526,62 @@ def handle_user_input(user_input):
                             "content": get_prompt_for_field(next_field)
                         })
                     else:
-                        # Confirm details before searching
                         origin_name = AIRPORT_CODES.get(st.session_state.trip_details['origin'], st.session_state.trip_details['origin'])
                         dest_name = AIRPORT_CODES.get(st.session_state.trip_details['destination'], st.session_state.trip_details['destination'])
-                        
-                        summary = f"""I'll search for flights from {origin_name} to {dest_name} on {
-                            st.session_state.trip_details['departure_date']}"""
-                            
+
+                        summary = f"Awesome! I'm finding flights from {origin_name} to {dest_name} on {st.session_state.trip_details['departure_date']}"
                         if st.session_state.trip_details.get("return_date"):
                             summary += f", returning {st.session_state.trip_details['return_date']}"
-                        
+
                         summary += f" for {st.session_state.trip_details['travelers']} traveler(s)."
-                        
+
                         if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
-                            summary += f"\n\nClass: {st.session_state.trip_details['class'].title()}"
-                        
+                            summary += f"
+
+Class: {st.session_state.trip_details['class'].title()}"
                         if st.session_state.trip_details.get("budget"):
-                            summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
-                        
+                            summary += f"
+Budget: ₹{st.session_state.trip_details['budget']}"
+
                         st.session_state.conversation.append({
                             "role": "assistant",
-                            "content": f"{summary}\n\nSearching now..."
+                            "content": f"{summary}
+
+Let me pull that up real quick! 🛫"
                         })
                         asyncio.run(process_trip())
                 else:
-                    st.session_state.conversation.append({
-                        "role": "assistant",
-                        "content": "I didn't understand that. Could you try something like:\n\n"
-                                  "'Flight from Delhi to Goa on May 5th'\n"
-                                  "'2 people going to Mumbai next weekend'\n"
-                                  "'Hotels in Bangalore for 3 nights from tomorrow'"
-                    })
-        
+                    gemini_input = f"""
+                    The user said: "{user_input}"
+                    You are a friendly travel assistant. If their request is unclear, gently ask for more info.
+                    Suggest how to describe their trip (like cities, dates, travelers). Give examples. Be warm and casual.
+                    """
+                    reply = model.generate_content(gemini_input).text.strip()
+                    st.session_state.conversation.append({"role": "assistant", "content": reply})
+
         elif st.session_state.current_step == "show_results":
             if "yes" in user_input.lower() or "search" in user_input.lower():
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "What would you like to search for next?"
+                    "content": "What would you like to search for next? 😊"
                 })
-                init_session_state()  # Reset search but keep conversation
+                init_session_state()
                 st.session_state.current_step = "collect_details"
             else:
                 st.session_state.conversation.append({
                     "role": "assistant",
-                    "content": "Thank you for using TravelEase! Type your next travel question or say 'search' to start over."
+                    "content": "Thank you for using TravelEase! Feel free to ask about your next adventure! 🌏"
                 })
-        
+
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        st.session_state.conversation.append({
+            "role": "assistant",
+            "content": "Oops! Something went wrong. Let’s try that again! 🔁"
+        })
+        st.session_state.current_step = "collect_details"
         st.rerun()
     
     except Exception as e:
