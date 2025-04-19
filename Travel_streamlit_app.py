@@ -461,14 +461,12 @@ def handle_user_input(user_input):
     
     try:
         if st.session_state.current_step == "welcome":
-            system_msg = """
-            You are a friendly travel assistant named TravelEase. Greet the user warmly,
-            briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),
-            and encourage them to describe their trip naturally. Be human and conversational.
-            """
-            gemini_input = f"{system_msg}\\n\\nUser: {user_input}"
-
-User: {user_input}"
+            system_msg = (
+            "You are a friendly travel assistant named TravelEase. Greet the user warmly,
+            "briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),
+            "and encourage them to describe their trip naturally. Be human and conversational.
+            )
+            gemini_input = system_msg + "\n\nUser: " + user_input
             reply = model.generate_content(gemini_input).text.strip()
             st.session_state.conversation.append({"role": "assistant", "content": reply})
             st.session_state.current_step = "collect_details"
