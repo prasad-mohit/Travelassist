@@ -489,18 +489,14 @@ def handle_user_input(user_input):
                     summary += f" for {st.session_state.trip_details['travelers']} traveler(s)."
 
                     if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
-                        summary += f"
+                        summary += f"\nClass: {st.session_state.trip_details['class'].title()}"
 
-Class: {st.session_state.trip_details['class'].title()}"
                     if st.session_state.trip_details.get("budget"):
-                        summary += f"
-Budget: ₹{st.session_state.trip_details['budget']}"
+                        summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
 
                     st.session_state.conversation.append({
                         "role": "assistant",
-                        "content": f"{summary}
-
-Hang tight while I look that up! 🔍"
+                        "content": summary + "\n\nHang tight while I look that up! 🔍"
                     })
                     asyncio.run(process_trip())
                 else:
