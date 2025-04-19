@@ -466,7 +466,7 @@ def handle_user_input(user_input):
             briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),
             and encourage them to describe their trip naturally. Be human and conversational.
             """
-            gemini_input = f"{system_msg}
+            gemini_input = f"{system_msg}\\n\\nUser: {user_input}"
 
 User: {user_input}"
             reply = model.generate_content(gemini_input).text.strip()
