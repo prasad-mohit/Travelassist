@@ -76,7 +76,8 @@ PARTNER_LOGOS = [
 AIRPORT_CODES = {
     "DEL": "Delhi", "BOM": "Mumbai", "GOI": "Goa",
     "BLR": "Bangalore", "HYD": "Hyderabad", "CCU": "Kolkata",
-    "MAA": "Chennai", "JFK": "New York", "LHR": "London"
+    "MAA": "Chennai", "JFK": "New York", "LHR": "London",
+    "MCT": "Muscat"
 }
 
 # Custom CSS
@@ -167,6 +168,19 @@ st.markdown("""
         33% { content: '..'; }
         66% { content: '...'; }
     }
+    .flight-table {
+        width: 100%;
+        margin: 10px 0;
+    }
+    .flight-table th {
+        text-align: left;
+        padding: 8px;
+        background-color: #f2f2f2;
+    }
+    .flight-table td {
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -210,13 +224,47 @@ async def search_flights(payload, token):
         st.error(f"Search error: {str(e)}")
         return None
 
+def process_flight_data(flight_data):
+    """Process flight data to add additional information and sort by direct flights"""
+    if not flight_data or not flight_data.get('data'):
+        return None
+    
+    processed_flights = []
+    
+    for offer in flight_data['data']:
+        # Calculate total duration
+        segments = offer['itineraries'][0]['segments']
+        departure = datetime.fromisoformat(segments[0]['departure']['at'])
+        arrival = datetime.fromisoformat(segments[-1]['arrival']['at'])
+        duration = str(arrival - departure)
+        
+        # Determine if flight is direct
+        is_direct = len(segments) == 1
+        
+        processed_flight = {
+            "offer": offer,
+            "is_direct": is_direct,
+            "duration": duration,
+            "baggage_allowance": {
+                "carry_on": "1 x 7kg" if offer.get('class', 'ECONOMY').upper() == 'ECONOMY' else "2 x 7kg",
+                "checked": "1 x 23kg" if offer.get('class', 'ECONOMY').upper() == 'ECONOMY' else "2 x 32kg"
+            },
+            "cancellation_policy": "Free cancellation within 24 hours" if is_direct else "Varies by airline"
+        }
+        processed_flights.append(processed_flight)
+    
+    # Sort flights - direct flights first, then by price
+    processed_flights.sort(key=lambda x: (not x['is_direct'], float(x['offer']['price']['grandTotal'])))
+    
+    return processed_flights[:3]  # Return top 3 options
+
 async def get_hotels(destination, check_in, check_out, travelers):
     """Simulated hotel search"""
     city = AIRPORT_CODES.get(destination, destination)
     return [
         {
             "name": f"Grand {city} Hotel",
-            "price": 7500,
+            "price": 75,
             "rating": 4.5,
             "address": f"123 Beach Road, {city}",
             "photo": "https://source.unsplash.com/random/300x200/?hotel",
@@ -224,7 +272,7 @@ async def get_hotels(destination, check_in, check_out, travelers):
         },
         {
             "name": f"{city} Palace",
-            "price": 12000,
+            "price": 120,
             "rating": 5,
             "address": f"456 Main Street, {city}",
             "photo": "https://source.unsplash.com/random/300x200/?luxury+hotel",
@@ -291,13 +339,16 @@ def build_flight_payload(details):
                      for i in range(details["travelers"])],
         "sources": ["GDS"],
         "searchCriteria": {
-            "maxFlightOffers": 3,
+            "maxFlightOffers": 5,
             "flightFilters": {
-                "cabOMRestrictions": [{
+                "cabinRestrictions": [{
                     "cabin": details.get("class", "ECONOMY").upper(),
                     "coverage": "MOST_SEGMENTS",
                     "originDestinationIds": ["1"]
-                }]
+                }],
+                "connectionRestriction": {
+                    "maxNumberOfConnections": 1
+                }
             }
         }
     }
@@ -312,7 +363,7 @@ def build_flight_payload(details):
                 "time": "10:00:00"
             }
         })
-        payload["searchCriteria"]["flightFilters"]["cabOMRestrictions"][0]["originDestinationIds"].append("2")
+        payload["searchCriteria"]["flightFilters"]["cabinRestrictions"][0]["originDestinationIds"].append("2")
     
     if details.get("budget"):
         payload["searchCriteria"]["flightFilters"]["priceRange"] = {
@@ -369,7 +420,7 @@ def get_missing_fields(details):
 def get_prompt_for_field(field):
     prompts = {
         "origin": "Which city are you flying from? (e.g., DEL for Delhi)",
-        "destination": "Where are you flying to? (e.g., GOI for Goa)",
+        "destination": "Where are you flying to? (e.g., MCT for Muscat)",
         "departure_date": "When are you departing? (YYYY-MM-DD format)",
         "return_date": "When will you return? (YYYY-MM-DD format)",
         "travelers": "How many people are traveling?",
@@ -409,26 +460,42 @@ def show_conversation():
         """, unsafe_allow_html=True)
 
 def show_results():
-    with st.expander("✈️ Flight Options", expanded=True):
-        if st.session_state.results["flights"] and st.session_state.results["flights"].get("data"):
-            for offer in st.session_state.results["flights"]["data"][:3]:
-                airline_code = offer['itineraries'][0]['segments'][0]['carrierCode']
-                airline_logo = AIRLINE_LOGOS.get(airline_code, AIRLINE_LOGOS['default'])
-                
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    st.image(airline_logo, width=80)
-                with col2:
-                    price = offer["price"]["grandTotal"]
-                    st.markdown(f"**<span class='price-tag'>₹{price}</span>**", unsafe_allow_html=True)
+    with st.expander("✈️ Flight Options (Prices in OMR)", expanded=True):
+        if st.session_state.results["flights"]:
+            processed_flights = process_flight_data(st.session_state.results["flights"])
+            
+            if processed_flights:
+                for flight in processed_flights:
+                    offer = flight['offer']
+                    airline_code = offer['itineraries'][0]['segments'][0]['carrierCode']
+                    airline_logo = AIRLINE_LOGOS.get(airline_code, AIRLINE_LOGOS['default'])
                     
-                    for seg in offer["itineraries"][0]["segments"]:
-                        st.write(f"**{seg['departure']['iataCode']} → {seg['arrival']['iataCode']}** "
-                                f"{seg['carrierCode']}{seg['number']} "
-                                f"{seg['departure']['at'][11:16]}-{seg['arrival']['at'][11:16]}")
-                st.markdown("---")
-        else:
-            st.info("No flights found. Try adjusting your search criteria.")
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.image(airline_logo, width=80)
+                        st.markdown(f"**{'✈️ Direct' if flight['is_direct'] else '🔀 Connecting'}**")
+                    with col2:
+                        price = float(offer["price"]["grandTotal"])
+                        st.markdown(f"**<span class='price-tag'>{price:.2f} OMR</span>**", unsafe_allow_html=True)
+                        
+                        # Flight segments
+                        for seg in offer["itineraries"][0]["segments"]:
+                            st.write(f"**{seg['departure']['iataCode']} → {seg['arrival']['iataCode']}** "
+                                    f"{seg['carrierCode']}{seg['number']} "
+                                    f"{seg['departure']['at'][11:16]}-{seg['arrival']['at'][11:16]}")
+                        
+                        # Additional flight information in a table
+                        st.markdown("### Flight Details")
+                        flight_info = {
+                            "Duration": flight['duration'],
+                            "Baggage Allowance": f"{flight['baggage_allowance']['carry_on']} (carry-on), {flight['baggage_allowance']['checked']} (checked)",
+                            "Cancellation Policy": flight['cancellation_policy']
+                        }
+                        
+                        st.table(flight_info)
+                    st.markdown("---")
+            else:
+                st.info("No flights found. Try adjusting your search criteria.")
     
     with st.expander("🏨 Hotel Options"):
         if st.session_state.results["hotels"]:
@@ -441,7 +508,7 @@ def show_results():
                 with col2:
                     st.markdown(f"**{hotel['name']}**")
                     st.markdown(f"<div class='rating'>{'⭐' * int(hotel['rating'])}{'☆' * (5 - int(hotel['rating']))}</div>", unsafe_allow_html=True)
-                    st.markdown(f"**<span class='price-tag'>₹{hotel['price']}</span>** per night", unsafe_allow_html=True)
+                    st.markdown(f"**<span class='price-tag'>{hotel['price']:.2f} OMR</span>** per night", unsafe_allow_html=True)
                     st.markdown(f"📍 {hotel['address']}")
                     if hotel.get("chain"):
                         st.image(chain_logo, width=100)
@@ -462,9 +529,9 @@ def handle_user_input(user_input):
     try:
         if st.session_state.current_step == "welcome":
             system_msg = (
-            "You are a friendly travel assistant named TravelEase. Greet the user warmly,"
-            "briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),"
-            "and encourage them to describe their trip naturally. Be human and conversational."
+                "You are a friendly travel assistant named TravelEase. Greet the user warmly,"
+                "briefly explain your capabilities (e.g., book flights, hotels, offer travel tips),"
+                "and encourage them to describe their trip naturally. Be human and conversational."
             )
             gemini_input = system_msg + "\n\nUser: " + user_input
             reply = model.generate_content(gemini_input).text.strip()
@@ -492,7 +559,7 @@ def handle_user_input(user_input):
                         summary += f"\nClass: {st.session_state.trip_details['class'].title()}"
 
                     if st.session_state.trip_details.get("budget"):
-                        summary += f"\nBudget: ₹{st.session_state.trip_details['budget']}"
+                        summary += f"\nBudget: {st.session_state.trip_details['budget']} OMR"
 
                     st.session_state.conversation.append({
                         "role": "assistant",
@@ -532,7 +599,7 @@ def handle_user_input(user_input):
                         if st.session_state.trip_details.get("class") and st.session_state.trip_details["class"] != "economy":
                             summary += f" \n Class: {st.session_state.trip_details['class'].title()}"
                         if st.session_state.trip_details.get("budget"):
-                            summary += f" \n Budget: ₹{st.session_state.trip_details['budget']}"
+                            summary += f" \n Budget: {st.session_state.trip_details['budget']} OMR"
 
                         st.session_state.conversation.append({
                             "role": "assistant",
@@ -568,16 +635,7 @@ def handle_user_input(user_input):
         st.error(f"Error: {str(e)}")
         st.session_state.conversation.append({
             "role": "assistant",
-            "content": "Oops! Something went wrong. Let’s try that again! 🔁"
-        })
-        st.session_state.current_step = "collect_details"
-        st.rerun()
-    
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        st.session_state.conversation.append({
-            "role": "assistant",
-            "content": "Sorry, I encountered an error. Let's try again. What were you looking for?"
+            "content": "Oops! Something went wrong. Let's try that again! 🔁"
         })
         st.session_state.current_step = "collect_details"
         st.rerun()
