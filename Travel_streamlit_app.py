@@ -277,7 +277,7 @@ def extract_trip_details(user_input):
 
 def build_flight_payload(details):
     payload = {
-        "currencyCode": "INR",
+        "currencyCode": "OMR",
         "originDestinations": [{
             "id": "1",
             "originLocationCode": details["origin"],
@@ -293,7 +293,7 @@ def build_flight_payload(details):
         "searchCriteria": {
             "maxFlightOffers": 3,
             "flightFilters": {
-                "cabinRestrictions": [{
+                "cabOMRestrictions": [{
                     "cabin": details.get("class", "ECONOMY").upper(),
                     "coverage": "MOST_SEGMENTS",
                     "originDestinationIds": ["1"]
@@ -312,12 +312,12 @@ def build_flight_payload(details):
                 "time": "10:00:00"
             }
         })
-        payload["searchCriteria"]["flightFilters"]["cabinRestrictions"][0]["originDestinationIds"].append("2")
+        payload["searchCriteria"]["flightFilters"]["cabOMRestrictions"][0]["originDestinationIds"].append("2")
     
     if details.get("budget"):
         payload["searchCriteria"]["flightFilters"]["priceRange"] = {
             "maxPrice": details["budget"],
-            "currency": "INR"
+            "currency": "OMR"
         }
     
     return payload
@@ -373,7 +373,7 @@ def get_prompt_for_field(field):
         "departure_date": "When are you departing? (YYYY-MM-DD format)",
         "return_date": "When will you return? (YYYY-MM-DD format)",
         "travelers": "How many people are traveling?",
-        "budget": "What's your budget (in INR)?",
+        "budget": "What's your budget (in OMR)?",
         "class": "Preferred class? (economy/business)"
     }
     return prompts.get(field, f"Please provide {field.replace('_', ' ')}")
